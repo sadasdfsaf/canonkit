@@ -34,54 +34,102 @@ const makeIssue = (issue: IssueDraft, index: number): ContinuityIssue => ({
 })
 
 const checkMissingCharacterCore = (project: StoryProject): IssueDraft[] =>
-  project.characters.flatMap((character) => {
-    const missing = coreCharacterFields
-      .filter(({ key }) => !character[key])
-      .map(({ label }) => label)
+  project.characters
+    .filter((character) => character.importance !== 'background')
+    .flatMap((character) => {
+      const missing = coreCharacterFields
+        .filter(({ key }) => !character[key])
+        .map(({ label }) => label)
 
-    if (character.anchorTraits.length === 0) {
-      missing.push('anchor traits')
-    }
+      if (character.anchorTraits.length === 0) {
+        missing.push('anchor traits')
+      }
 
-    if (character.goals.length === 0) {
-      missing.push('goals')
-    }
+      if (character.goals.length === 0) {
+        missing.push('goals')
+      }
 
-    if (character.fears.length === 0) {
-      missing.push('fears')
-    }
+      if (character.fears.length === 0) {
+        missing.push('fears')
+      }
 
-    if (missing.length === 0) {
-      return []
-    }
+      if (missing.length === 0) {
+        return []
+      }
 
-    return [
-      {
-        severity: character.importance === 'core' ? 'high' : 'medium',
-        category: 'missing-character-core',
-        title: `${character.name} is missing essential canon fields`,
-        message: `Missing: ${missing.join(', ')}.`,
-        entityLabel: character.name,
-        recommendation:
-          'Fill in the missing archetype, motivations, fears, and anchor traits before expanding this character into later scenes.',
-      },
-    ]
-  })
+      return [
+        {
+          severity: character.importance === 'core' ? 'high' : 'medium',
+          category: 'missing-character-core',
+          title: `${character.name} is missing essential canon fields`,
+          message: `Missing: ${missing.join(', ')}.`,
+          entityLabel: character.name,
+          recommendation:
+            'Fill in the missing archetype, motivations, fears, and anchor traits before expanding this character into later scenes.',
+        },
+      ]
+    })
 
 const buildCharacterMap = (project: StoryProject) =>
   new Map(project.characters.map((character) => [character.id, character]))
 
-const buildTimelineState = (character: Character, scene: Scene) =>
-  character.stateChanges
-    .filter(
-      (change) =>
-        change.year < scene.year ||
-        (change.year === scene.year && change.sceneId.localeCompare(scene.id) <= 0),
-    )
+const buildSceneOrder = (project: StoryProject) =>
+  new Map(project.scenes.map((scene, index) => [scene.id, index]))
+
+const buildTimelineState = (
+  sceneOrder: Map<string, number>,
+  character: Character,
+  scene: Scene,
+) => {
+  const currentSceneIndex = sceneOrder.get(scene.id)
+
+  return character.stateChanges
+    .filter((change) => {
+      if (change.year < scene.year) {
+        return true
+      }
+
+      if (change.year > scene.year) {
+        return false
+      }
+
+      const changeSceneIndex = sceneOrder.get(change.sceneId)
+
+      // If we cannot place a same-year state change on the scene timeline,
+      // do not let it override a known scene state and create false positives.
+      return (
+        changeSceneIndex !== undefined &&
+        currentSceneIndex !== undefined &&
+        changeSceneIndex <= currentSceneIndex
+      )
+    })
+    .sort((a, b) => {
+      if (a.year !== b.year) {
+        return a.year - b.year
+      }
+
+      const leftIndex = sceneOrder.get(a.sceneId)
+      const rightIndex = sceneOrder.get(b.sceneId)
+
+      if (leftIndex === undefined && rightIndex === undefined) {
+        return 0
+      }
+
+      if (leftIndex === undefined) {
+        return 1
+      }
+
+      if (rightIndex === undefined) {
+        return -1
+      }
+
+      return leftIndex - rightIndex
+    })
     .reduce<Record<string, string | number>>((state, change) => {
       state[change.key] = change.nextValue
       return state
     }, {})
+}
 
 const checkAgeMismatch = (project: StoryProject): IssueDraft[] => {
   const characterMap = buildCharacterMap(project)
@@ -152,6 +200,7 @@ const checkMissingEntityReferences = (project: StoryProject): IssueDraft[] => {
 
 const checkStateConflicts = (project: StoryProject): IssueDraft[] => {
   const characterMap = buildCharacterMap(project)
+  const sceneOrder = buildSceneOrder(project)
 
   return project.scenes.flatMap((scene) =>
     scene.stateReferences.flatMap((reference) => {
@@ -160,7 +209,7 @@ const checkStateConflicts = (project: StoryProject): IssueDraft[] => {
         return []
       }
 
-      const timelineState = buildTimelineState(character, scene)
+      const timelineState = buildTimelineState(sceneOrder, character, scene)
       const actualValue = timelineState[reference.key]
 
       if (actualValue === undefined || actualValue === reference.expectedValue) {

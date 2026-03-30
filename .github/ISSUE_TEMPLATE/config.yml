@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Product discussion
+    url: https://github.com/sadasdfsaf/canonkit/discussions
+    about: Use discussions for broader product or roadmap conversations if discussions are enabled.

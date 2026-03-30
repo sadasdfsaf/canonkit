@@ -2,7 +2,15 @@
 
 > Local-first story bible and continuity checker for fiction teams and solo authors.
 
+[![CI](https://github.com/sadasdfsaf/canonkit/actions/workflows/ci.yml/badge.svg)](https://github.com/sadasdfsaf/canonkit/actions/workflows/ci.yml)
+[![Deploy Pages](https://github.com/sadasdfsaf/canonkit/actions/workflows/deploy-pages.yml/badge.svg)](https://github.com/sadasdfsaf/canonkit/actions/workflows/deploy-pages.yml)
+
 CanonKit is an open-source product wedge for novel writing. It does not try to replace every drafting tool and it does not bet the whole product on "AI writes the book for you." Instead, it focuses on the layer that becomes painful in long-form fiction: canon drift.
+
+## Live Demo
+
+- Repository: [github.com/sadasdfsaf/canonkit](https://github.com/sadasdfsaf/canonkit)
+- Demo URL: [sadasdfsaf.github.io/canonkit](https://sadasdfsaf.github.io/canonkit/)
 
 When a project grows, authors lose time to the same problems:
 
@@ -89,6 +97,19 @@ Preview the build:
 npm run preview
 ```
 
+To build with a non-root base path, for example for GitHub Pages:
+
+```bash
+CANONKIT_BASE=/canonkit/ npm run build
+```
+
+In PowerShell:
+
+```powershell
+$env:CANONKIT_BASE = '/canonkit/'
+npm run build
+```
+
 ## Repository Structure
 
 ```text
@@ -104,3 +125,7 @@ docs/
 ## Market Notes
 
 The longer commercial analysis lives in [docs/market-analysis.md](./docs/market-analysis.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md).

@@ -86,6 +86,7 @@
 
 .primary-link,
 .copy-button,
+.toolbar-button,
 .selector-button,
 .scene-card {
   transition:
@@ -117,6 +118,53 @@
 .secondary-copy {
   max-width: 34ch;
   font-size: 0.95rem;
+}
+
+.utility-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 18px;
+  align-items: center;
+}
+
+.toolbar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(24, 23, 26, 0.12);
+  background: rgba(255, 255, 255, 0.7);
+  color: #18171a;
+  cursor: pointer;
+  font: inherit;
+}
+
+.toolbar-button.ghost {
+  background: rgba(24, 23, 26, 0.05);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(22, 79, 90, 0.08);
+  color: #164f5a;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.toolbar-note {
+  margin: 14px 0 0;
+  min-height: 24px;
+  font-size: 0.95rem;
+}
+
+.hidden-input {
+  display: none;
 }
 
 .hero-metrics {
@@ -433,8 +481,14 @@
   }
 
   .selector-button,
-  .scene-card {
+  .scene-card,
+  .utility-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .status-pill {
+    width: 100%;
+    justify-content: center;
   }
 }

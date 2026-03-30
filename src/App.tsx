@@ -1,11 +1,20 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { ChangeEvent } from 'react'
+
 import './App.css'
 import { sampleProject } from './data/sampleProject'
-import { generateContinuityReport } from './lib/continuity'
-import type { Character, ContinuityIssue, Scene, StoryProject } from './types'
-
-const project = sampleProject
-const report = generateContinuityReport(project)
+import {
+  buildSceneOrder,
+  buildTimelineState,
+  generateContinuityReport,
+} from './lib/continuity'
+import {
+  clearStoredProject,
+  loadProjectFromStorage,
+  parseProjectJson,
+  saveProjectToStorage,
+} from './lib/projectStorage'
+import type { ContinuityIssue, Scene, StoryProject } from './types'
 
 const severityRank: Record<ContinuityIssue['severity'], number> = {
   critical: 0,
@@ -22,41 +31,12 @@ const categoryCopy: Record<ContinuityIssue['category'], string> = {
   'relationship-asymmetry': 'Relationship asymmetry',
 }
 
-const buildSceneOrderIndex = (storyProject: StoryProject) =>
-  new Map(storyProject.scenes.map((scene, index) => [scene.id, index]))
-
-const buildTimelineState = (
+const buildSceneContextPack = (
   storyProject: StoryProject,
-  character: Character,
+  report: ReturnType<typeof generateContinuityReport>,
   scene: Scene,
 ) => {
-  const sceneIndex = buildSceneOrderIndex(storyProject)
-
-  return character.stateChanges
-    .filter((change) => {
-      if (change.year < scene.year) {
-        return true
-      }
-
-      if (change.year > scene.year) {
-        return false
-      }
-
-      return (
-        (sceneIndex.get(change.sceneId) ?? Number.MAX_SAFE_INTEGER) <=
-        (sceneIndex.get(scene.id) ?? Number.MAX_SAFE_INTEGER)
-      )
-    })
-    .reduce<Record<string, string | number>>((state, change) => {
-      state[change.key] = change.nextValue
-      return state
-    }, {})
-}
-
-const getSceneIssueCount = (scene: Scene) =>
-  report.issues.filter((issue) => issue.sceneTitle === scene.title).length
-
-const buildSceneContextPack = (storyProject: StoryProject, scene: Scene) => {
+  const sceneOrder = buildSceneOrder(storyProject)
   const characters = storyProject.characters.filter((character) =>
     scene.references.some(
       (reference) =>
@@ -82,7 +62,7 @@ const buildSceneContextPack = (storyProject: StoryProject, scene: Scene) => {
 
   const characterNotes = characters
     .map((character) => {
-      const timelineState = buildTimelineState(storyProject, character, scene)
+      const timelineState = buildTimelineState(sceneOrder, character, scene)
       const stateEntries = Object.entries(timelineState)
         .map(([key, value]) => `${key}: ${value}`)
         .join(', ')
@@ -134,13 +114,59 @@ const buildSceneContextPack = (storyProject: StoryProject, scene: Scene) => {
   ].join('\n')
 }
 
+const getDownloadFilename = (storyProject: StoryProject) =>
+  `${storyProject.id || 'canonkit-project'}.json`
+
+const initialProjectState = () => {
+  if (typeof window === 'undefined') {
+    return { project: sampleProject, source: 'sample' as const }
+  }
+
+  return loadProjectFromStorage(window.localStorage, sampleProject)
+}
+
 function App() {
-  const [selectedSceneId, setSelectedSceneId] = useState(project.scenes[0]?.id ?? '')
+  const [initialState] = useState(initialProjectState)
+  const [project, setProject] = useState(initialState.project)
+  const [selectedSceneId, setSelectedSceneId] = useState(
+    initialState.project.scenes[0]?.id ?? '',
+  )
   const [selectedCharacterId, setSelectedCharacterId] = useState(
-    project.characters[0]?.id ?? '',
+    initialState.project.characters[0]?.id ?? '',
   )
   const [copied, setCopied] = useState(false)
+  const [workspaceNotice, setWorkspaceNotice] = useState(
+    initialState.error ??
+      (initialState.source === 'localStorage'
+        ? 'Loaded the saved browser copy of this project.'
+        : 'Loaded the bundled sample project. Changes autosave in this browser.'),
+  )
+  const [storageWarning, setStorageWarning] = useState<string | null>(null)
+  const importInputRef = useRef<HTMLInputElement | null>(null)
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const result = saveProjectToStorage(window.localStorage, project)
+    setStorageWarning(result.ok ? null : result.error)
+  }, [project])
+
+  useEffect(() => {
+    if (!project.scenes.some((scene) => scene.id === selectedSceneId)) {
+      setSelectedSceneId(project.scenes[0]?.id ?? '')
+    }
+  }, [project, selectedSceneId])
+
+  useEffect(() => {
+    if (!project.characters.some((character) => character.id === selectedCharacterId)) {
+      setSelectedCharacterId(project.characters[0]?.id ?? '')
+    }
+  }, [project, selectedCharacterId])
+
+  const report = generateContinuityReport(project)
+  const sceneOrder = buildSceneOrder(project)
   const selectedScene =
     project.scenes.find((scene) => scene.id === selectedSceneId) ?? project.scenes[0]
   const selectedCharacter =
@@ -150,26 +176,82 @@ function App() {
   const selectedSceneIssues = report.issues
     .filter(
       (issue) =>
-        issue.sceneTitle === selectedScene.title ||
-        issue.entityLabel.includes(selectedCharacter.name),
+        issue.sceneTitle === selectedScene?.title ||
+        (selectedCharacter ? issue.entityLabel.includes(selectedCharacter.name) : false),
     )
     .sort((left, right) => severityRank[left.severity] - severityRank[right.severity])
 
-  const sceneContextPack = buildSceneContextPack(project, selectedScene)
-  const selectedCharacterState = buildTimelineState(
-    project,
-    selectedCharacter,
-    selectedScene,
-  )
+  const sceneContextPack = selectedScene
+    ? buildSceneContextPack(project, report, selectedScene)
+    : 'No scene selected.'
+  const selectedCharacterState =
+    selectedScene && selectedCharacter
+      ? buildTimelineState(sceneOrder, selectedCharacter, selectedScene)
+      : {}
+
+  const getSceneIssueCount = (scene: Scene) =>
+    report.issues.filter((issue) => issue.sceneTitle === scene.title).length
 
   const copyContextPack = async () => {
     try {
       await navigator.clipboard.writeText(sceneContextPack)
       setCopied(true)
+      setWorkspaceNotice('Copied the current scene context pack to the clipboard.')
       window.setTimeout(() => setCopied(false), 1400)
     } catch {
       setCopied(false)
+      setWorkspaceNotice('Clipboard access failed. You can still copy the pack manually.')
     }
+  }
+
+  const exportProject = () => {
+    const payload = JSON.stringify(project, null, 2)
+    const blob = new Blob([payload], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = getDownloadFilename(project)
+    anchor.click()
+    URL.revokeObjectURL(url)
+    setWorkspaceNotice(`Exported ${anchor.download}.`)
+  }
+
+  const promptImport = () => {
+    importInputRef.current?.click()
+  }
+
+  const handleImport = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+
+    if (!file) {
+      return
+    }
+
+    try {
+      const raw = await file.text()
+      const importedProject = parseProjectJson(raw)
+      setProject(importedProject)
+      setSelectedSceneId(importedProject.scenes[0]?.id ?? '')
+      setSelectedCharacterId(importedProject.characters[0]?.id ?? '')
+      setWorkspaceNotice(`Imported ${file.name}. This browser copy is now active.`)
+    } catch (error) {
+      setWorkspaceNotice(
+        error instanceof Error ? error.message : 'Import failed for an unknown reason.',
+      )
+    } finally {
+      event.target.value = ''
+    }
+  }
+
+  const resetToSample = () => {
+    if (typeof window !== 'undefined') {
+      clearStoredProject(window.localStorage)
+    }
+
+    setProject(sampleProject)
+    setSelectedSceneId(sampleProject.scenes[0]?.id ?? '')
+    setSelectedCharacterId(sampleProject.characters[0]?.id ?? '')
+    setWorkspaceNotice('Reset to the bundled sample project.')
   }
 
   return (
@@ -192,6 +274,26 @@ function App() {
               generation.
             </span>
           </div>
+          <div className="utility-row">
+            <button type="button" className="toolbar-button" onClick={promptImport}>
+              Import JSON
+            </button>
+            <button type="button" className="toolbar-button" onClick={exportProject}>
+              Export JSON
+            </button>
+            <button type="button" className="toolbar-button ghost" onClick={resetToSample}>
+              Reset sample
+            </button>
+            <span className="status-pill">Autosaves in this browser</span>
+          </div>
+          <p className="toolbar-note">{storageWarning ?? workspaceNotice}</p>
+          <input
+            ref={importInputRef}
+            className="hidden-input"
+            type="file"
+            accept=".json,application/json"
+            onChange={handleImport}
+          />
         </div>
 
         <div className="hero-metrics">
@@ -211,9 +313,9 @@ function App() {
             </p>
           </article>
           <article className="metric-card">
-            <span className="metric-label">Commercial wedge</span>
-            <strong>BYO canon</strong>
-            <p>Open-source core now, paid sync, collaboration, and analysis later.</p>
+            <span className="metric-label">Current project ID</span>
+            <strong>{project.id}</strong>
+            <p>Exportable JSON project data with browser persistence by default.</p>
           </article>
         </div>
       </header>
@@ -292,11 +394,12 @@ function App() {
                 <button
                   key={character.id}
                   className={
-                    character.id === selectedCharacter.id
+                    selectedCharacter && character.id === selectedCharacter.id
                       ? 'selector-button active'
                       : 'selector-button'
                   }
                   onClick={() => setSelectedCharacterId(character.id)}
+                  type="button"
                 >
                   <span>{character.name}</span>
                   <small>{character.role ?? 'Needs role'}</small>
@@ -304,70 +407,73 @@ function App() {
               ))}
             </div>
 
-            <div className="detail-block">
-              <div className="detail-heading">
-                <div>
-                  <h3>{selectedCharacter.name}</h3>
-                  <p>
-                    {selectedCharacter.archetype ?? 'Archetype missing'} |{' '}
-                    {selectedCharacter.role ?? 'Role missing'}
-                  </p>
+            {selectedCharacter ? (
+              <div className="detail-block">
+                <div className="detail-heading">
+                  <div>
+                    <h3>{selectedCharacter.name}</h3>
+                    <p>
+                      {selectedCharacter.archetype ?? 'Archetype missing'} |{' '}
+                      {selectedCharacter.role ?? 'Role missing'}
+                    </p>
+                  </div>
+                  <span className="importance-pill">{selectedCharacter.importance}</span>
                 </div>
-                <span className="importance-pill">{selectedCharacter.importance}</span>
-              </div>
 
-              <div className="detail-grid">
-                <div>
-                  <h4>Anchors</h4>
-                  <p>{selectedCharacter.anchorTraits.join(', ') || 'No anchor traits yet.'}</p>
+                <div className="detail-grid">
+                  <div>
+                    <h4>Anchors</h4>
+                    <p>{selectedCharacter.anchorTraits.join(', ') || 'No anchor traits yet.'}</p>
+                  </div>
+                  <div>
+                    <h4>Goals</h4>
+                    <p>{selectedCharacter.goals.join(', ') || 'No goals yet.'}</p>
+                  </div>
+                  <div>
+                    <h4>Fears</h4>
+                    <p>{selectedCharacter.fears.join(', ') || 'No fears yet.'}</p>
+                  </div>
+                  <div>
+                    <h4>Current state at scene</h4>
+                    <p>
+                      {Object.entries(selectedCharacterState)
+                        .map(([key, value]) => `${key}: ${value}`)
+                        .join(', ') || 'No state transitions active yet.'}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h4>Goals</h4>
-                  <p>{selectedCharacter.goals.join(', ') || 'No goals yet.'}</p>
-                </div>
-                <div>
-                  <h4>Fears</h4>
-                  <p>{selectedCharacter.fears.join(', ') || 'No fears yet.'}</p>
-                </div>
-                <div>
-                  <h4>Current state at scene</h4>
-                  <p>
-                    {Object.entries(selectedCharacterState)
-                      .map(([key, value]) => `${key}: ${value}`)
-                      .join(', ') || 'No state transitions active yet.'}
-                  </p>
-                </div>
-              </div>
 
-              <div className="fact-list">
-                <div>
-                  <h4>Canon facts</h4>
-                  <ul>
-                    {selectedCharacter.facts.map((fact) => (
-                      <li key={fact.key}>
-                        <span>{fact.label}</span>
-                        <strong>{fact.value}</strong>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div>
-                  <h4>Relationships</h4>
-                  <ul>
-                    {selectedCharacter.relationships.map((relationship) => (
-                      <li key={`${relationship.targetCharacterId}-${relationship.label}`}>
-                        <span>{relationship.label}</span>
-                        <strong>
-                          {project.characters.find(
-                            (character) => character.id === relationship.targetCharacterId,
-                          )?.name ?? relationship.targetCharacterId}
-                        </strong>
-                      </li>
-                    ))}
-                  </ul>
+                <div className="fact-list">
+                  <div>
+                    <h4>Canon facts</h4>
+                    <ul>
+                      {selectedCharacter.facts.map((fact) => (
+                        <li key={fact.key}>
+                          <span>{fact.label}</span>
+                          <strong>{fact.value}</strong>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <h4>Relationships</h4>
+                    <ul>
+                      {selectedCharacter.relationships.map((relationship) => (
+                        <li key={`${relationship.targetCharacterId}-${relationship.label}`}>
+                          <span>{relationship.label}</span>
+                          <strong>
+                            {project.characters.find(
+                              (character) =>
+                                character.id === relationship.targetCharacterId,
+                            )?.name ?? relationship.targetCharacterId}
+                          </strong>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : null}
           </article>
 
           <article className="panel panel-scenes">
@@ -381,8 +487,9 @@ function App() {
               {project.scenes.map((scene) => (
                 <button
                   key={scene.id}
-                  className={scene.id === selectedScene.id ? 'scene-card active' : 'scene-card'}
+                  className={selectedScene && scene.id === selectedScene.id ? 'scene-card active' : 'scene-card'}
                   onClick={() => setSelectedSceneId(scene.id)}
+                  type="button"
                 >
                   <div>
                     <span className="scene-chapter">{scene.chapter}</span>
@@ -392,33 +499,37 @@ function App() {
                 </button>
               ))}
             </div>
-            <div className="selected-scene">
-              <div className="detail-heading">
-                <div>
-                  <h3>{selectedScene.title}</h3>
-                  <p>
-                    {selectedScene.chapter} | {selectedScene.year}
-                  </p>
+            {selectedScene ? (
+              <div className="selected-scene">
+                <div className="detail-heading">
+                  <div>
+                    <h3>{selectedScene.title}</h3>
+                    <p>
+                      {selectedScene.chapter} | {selectedScene.year}
+                    </p>
+                  </div>
+                  <span className="importance-pill">
+                    POV:{' '}
+                    {project.characters.find(
+                      (character) => character.id === selectedScene.povCharacterId,
+                    )?.name ?? 'Unknown'}
+                  </span>
                 </div>
-                <span className="importance-pill">
-                  POV:{' '}
-                  {project.characters.find(
-                    (character) => character.id === selectedScene.povCharacterId,
-                  )?.name ?? 'Unknown'}
-                </span>
+                <p className="scene-summary">{selectedScene.summary}</p>
+                <div className="detail-grid">
+                  <div>
+                    <h4>Scene goals</h4>
+                    <p>{selectedScene.goals.join(', ')}</p>
+                  </div>
+                  <div>
+                    <h4>Referenced entities</h4>
+                    <p>
+                      {selectedScene.references.map((reference) => reference.label).join(', ')}
+                    </p>
+                  </div>
+                </div>
               </div>
-              <p className="scene-summary">{selectedScene.summary}</p>
-              <div className="detail-grid">
-                <div>
-                  <h4>Scene goals</h4>
-                  <p>{selectedScene.goals.join(', ')}</p>
-                </div>
-                <div>
-                  <h4>Referenced entities</h4>
-                  <p>{selectedScene.references.map((reference) => reference.label).join(', ')}</p>
-                </div>
-              </div>
-            </div>
+            ) : null}
           </article>
 
           <article className="panel panel-report">
@@ -464,7 +575,7 @@ function App() {
                 <p className="panel-kicker">LLM handoff</p>
                 <h2>Scene context pack</h2>
               </div>
-              <button className="copy-button" onClick={copyContextPack}>
+              <button className="copy-button" onClick={copyContextPack} type="button">
                 {copied ? 'Copied' : 'Copy pack'}
               </button>
             </div>

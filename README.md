@@ -39,6 +39,7 @@ CanonKit is designed to fill that gap.
 This repository currently ships a GitHub-friendly MVP:
 
 - structured sample project data for characters, locations, rules, and scenes
+- local-first browser persistence with JSON import and export
 - a continuity engine that detects:
   - missing core character setup
   - age and timeline mismatches
@@ -122,6 +123,7 @@ npm run build
 src/
   data/       sample fiction project
   lib/        continuity checks
+              project storage and import/export helpers
   types.ts    core domain model
   App.tsx     product demo UI
 docs/

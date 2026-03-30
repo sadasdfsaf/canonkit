@@ -73,10 +73,10 @@ const checkMissingCharacterCore = (project: StoryProject): IssueDraft[] =>
 const buildCharacterMap = (project: StoryProject) =>
   new Map(project.characters.map((character) => [character.id, character]))
 
-const buildSceneOrder = (project: StoryProject) =>
+export const buildSceneOrder = (project: StoryProject) =>
   new Map(project.scenes.map((scene, index) => [scene.id, index]))
 
-const buildTimelineState = (
+export const buildTimelineState = (
   sceneOrder: Map<string, number>,
   character: Character,
   scene: Scene,

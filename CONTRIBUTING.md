@@ -18,6 +18,7 @@ npm run dev
 Run the core checks before opening a pull request:
 
 ```bash
+npm run test
 npm run lint
 npm run build
 ```

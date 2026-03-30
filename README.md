@@ -85,6 +85,12 @@ npm install
 npm run dev
 ```
 
+Run the continuity engine tests:
+
+```bash
+npm run test
+```
+
 Build the production bundle:
 
 ```bash
